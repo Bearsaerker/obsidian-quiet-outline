@@ -96,7 +96,7 @@ const DEFAULT_SETTINGS: QuietOutlineSettings = {
     auto_scroll_into_view: true,
 
     // Canvas settings
-    vimlize_canvas: true,
+    vimlize_canvas: false,
     canvas_sort_by: "area",
     shown_node_types: ["file", "group", "text", "link"],
     heading_truncate_length: 20,
