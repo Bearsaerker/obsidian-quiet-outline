@@ -4,6 +4,25 @@ import { Nav } from "./base";
 
 // ---- LineageView dynamic types (no import from lineage plugin) ----
 
+type LineageViewState = {
+    document: {
+        activeNode: string;
+    };
+};
+
+type LineageViewAction = {
+    type: string;
+    payload?: { id: string };
+};
+
+type LineageSubscribeCallback = (
+    value: LineageViewState,
+    action?: LineageViewAction,
+    firstRun?: boolean,
+) => void;
+
+type Unsubscriber = () => void;
+
 type LineageViewLike = {
     isActive: boolean;
     file: { path: string } | null;
@@ -20,6 +39,8 @@ type LineageViewLike = {
     };
     viewStore: {
         dispatch(action: { type: string; payload: { id: string } }): void;
+        getValue(): LineageViewState;
+        subscribe(callback: LineageSubscribeCallback): Unsubscriber;
     };
     container: HTMLElement | null;
     leaf: {
@@ -60,10 +81,18 @@ function sectionLevel(section: string): number {
     return section.split(".").length;
 }
 
+/** Get parent section number: "2.1" → "2", "1" → null */
+function getParentSection(section: string): string | null {
+    const dotIdx = section.lastIndexOf(".");
+    if (dotIdx === -1) return null;
+    return section.slice(0, dotIdx);
+}
+
 // ---- Navigator ----
 
 export class LineageNav extends Nav {
     canDrop: boolean = false;
+    private unsubscribeViewStore: Unsubscriber | null = null;
 
     constructor(plugin: QuietOutline, view: unknown) {
         super(plugin, view as any);
@@ -223,11 +252,82 @@ export class LineageNav extends Nav {
     }
 
     async onload(): Promise<void> {
-        // No special listeners needed — the plugin's metadata cache
-        // listener will trigger refresh when the file changes
+        // Subscribe to lineage viewStore to sync outline highlight when
+        // user navigates cards (J/K keys, mouse clicks, etc.)
+        // Wrapped in try-catch so subscription failure doesn't break the navigator
+        try {
+            const lineageView = this.findActiveLineageView();
+            if (!lineageView) return;
+
+            // Check if viewStore has subscribe method (defensive)
+            if (typeof lineageView.viewStore.subscribe !== "function") return;
+
+            // oxlint-disable-next-line no-this-alias
+            const self = this;
+            this.unsubscribeViewStore = lineageView.viewStore.subscribe(
+                (viewState: LineageViewState, action?: LineageViewAction, firstRun?: boolean) => {
+                    // Skip initial callback — headers aren't populated yet
+                    if (firstRun) return;
+
+                    try {
+                        // Only react to active node changes from user navigation,
+                        // not from our own jump() calls (which use 'mouse' type)
+                        if (action?.type === "view/set-active-node/mouse") return;
+
+                        // Only sync when lineage view is active (user is navigating in it)
+                        if (!lineageView.isActive) return;
+
+                        const activeNodeId = viewState.document.activeNode;
+                        if (!activeNodeId) return;
+
+                        // Find the heading index — try exact match first, then walk
+                        // up parent sections to find the nearest ancestor with a heading
+                        let index = store.headers.findIndex(
+                            (h) => h.id === activeNodeId
+                        );
+
+                        // If no exact match, find parent section's heading
+                        if (index === -1) {
+                            const docState = lineageView.documentStore.getValue();
+                            const sectionNum =
+                                docState.sections.id_section[activeNodeId];
+                            if (sectionNum) {
+                                const parentSection = getParentSection(sectionNum);
+                                if (
+                                    parentSection &&
+                                    docState.sections.section_id[
+                                        parentSection
+                                    ]
+                                ) {
+                                    const parentNodeId =
+                                        docState.sections.section_id[
+                                            parentSection
+                                        ];
+                                    index = store.headers.findIndex(
+                                        (h) => h.id === parentNodeId
+                                    );
+                                }
+                            }
+                        }
+
+                        if (index === -1) return;
+
+                        // Update the outline highlight
+                        self.plugin.outlineView?.vueInstance.onPosChange(index);
+                    } catch {
+                        // Silently ignore errors in subscription callback
+                    }
+                }
+            );
+        } catch {
+            // Subscription failed — navigator still works, just without sync
+        }
     }
 
     async onunload(): Promise<void> {
-        // Nothing to clean up
+        if (this.unsubscribeViewStore) {
+            this.unsubscribeViewStore();
+            this.unsubscribeViewStore = null;
+        }
     }
 }
