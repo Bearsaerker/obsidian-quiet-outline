@@ -206,6 +206,9 @@ export default class QuietOutline extends Plugin {
         const newHeaders = await this.navigator.getHeaders();
         store.headers = newHeaders;
         this.outlineView?.vueInstance.onLeafChange();
+
+        // Let the navigator sync any initial state (e.g., lineage active node position)
+        await this.navigator.onLeafChange();
     }
 
     async onunload() {

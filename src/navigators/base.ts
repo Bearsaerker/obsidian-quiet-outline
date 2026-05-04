@@ -53,6 +53,7 @@ export abstract class Nav extends Component {
     async install() { }
     async onload(): Promise<void> { }
     async onunload(): Promise<void> { }
+    async onLeafChange(): Promise<void> { }
      async handleDrop(
         from: number,
         to: number,

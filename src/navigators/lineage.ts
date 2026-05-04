@@ -251,6 +251,58 @@ export class LineageNav extends Nav {
         return parseInt(this.plugin.settings.expand_level);
     }
 
+    /**
+     * Find the heading index for a given node ID.
+     * Tries exact match first, then walks up parent sections to find
+     * the nearest ancestor with a heading.
+     */
+    findHeadingIndexByNodeId(nodeId: string): number {
+        const lineageView = this.findActiveLineageView();
+        if (!lineageView) return -1;
+
+        // Try exact match
+        let index = store.headers.findIndex((h) => h.id === nodeId);
+
+        // If no exact match, find parent section's heading
+        if (index === -1) {
+            const docState = lineageView.documentStore.getValue();
+            const sectionNum = docState.sections.id_section[nodeId];
+            if (sectionNum) {
+                const parentSection = getParentSection(sectionNum);
+                if (
+                    parentSection &&
+                    docState.sections.section_id[parentSection]
+                ) {
+                    const parentNodeId =
+                        docState.sections.section_id[parentSection];
+                    index = store.headers.findIndex(
+                        (h) => h.id === parentNodeId
+                    );
+                }
+            }
+        }
+
+        return index;
+    }
+
+    async onLeafChange(): Promise<void> {
+        // Sync the initial active node position from the lineage view to the outline
+        const lineageView = this.findActiveLineageView();
+        if (!lineageView) return;
+
+        try {
+            const activeNodeId = lineageView.viewStore.getValue().document.activeNode;
+            if (!activeNodeId) return;
+
+            const index = this.findHeadingIndexByNodeId(activeNodeId);
+            if (index >= 0) {
+                this.plugin.outlineView?.vueInstance.onPosChange(index);
+            }
+        } catch {
+            // Silently ignore errors
+        }
+    }
+
     async onload(): Promise<void> {
         // Subscribe to lineage viewStore to sync outline highlight when
         // user navigates cards (J/K keys, mouse clicks, etc.)
@@ -280,36 +332,7 @@ export class LineageNav extends Nav {
                         const activeNodeId = viewState.document.activeNode;
                         if (!activeNodeId) return;
 
-                        // Find the heading index — try exact match first, then walk
-                        // up parent sections to find the nearest ancestor with a heading
-                        let index = store.headers.findIndex(
-                            (h) => h.id === activeNodeId
-                        );
-
-                        // If no exact match, find parent section's heading
-                        if (index === -1) {
-                            const docState = lineageView.documentStore.getValue();
-                            const sectionNum =
-                                docState.sections.id_section[activeNodeId];
-                            if (sectionNum) {
-                                const parentSection = getParentSection(sectionNum);
-                                if (
-                                    parentSection &&
-                                    docState.sections.section_id[
-                                        parentSection
-                                    ]
-                                ) {
-                                    const parentNodeId =
-                                        docState.sections.section_id[
-                                            parentSection
-                                        ];
-                                    index = store.headers.findIndex(
-                                        (h) => h.id === parentNodeId
-                                    );
-                                }
-                            }
-                        }
-
+                        const index = self.findHeadingIndexByNodeId(activeNodeId);
                         if (index === -1) return;
 
                         // Update the outline highlight
